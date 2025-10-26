@@ -14,8 +14,17 @@ interface Config {
   autoRefreshInterval: number;
 }
 
+const CACHE_KEY = 'dashboard_data_cache';
+
+interface CachedData {
+  performances: CustomerPerformance[];
+  summary: DashboardSummary;
+  timestamp: number;
+}
+
 const Index = () => {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [performances, setPerformances] = useState<CustomerPerformance[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerPerformance | null>(null);
@@ -23,12 +32,39 @@ const Index = () => {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [config, setConfig] = useState<Config | null>(null);
 
-  // Load config and initial data
+  const loadFromCache = (): boolean => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const cachedData: CachedData = JSON.parse(cached);
+        setPerformances(cachedData.performances);
+        setSummary(cachedData.summary);
+        setLastRefresh(new Date(cachedData.timestamp));
+        return true;
+      }
+    } catch (error) {
+      console.error('Error loading from cache:', error);
+    }
+    return false;
+  };
+
+  const saveToCache = (performances: CustomerPerformance[], summary: DashboardSummary) => {
+    try {
+      const cacheData: CachedData = {
+        performances,
+        summary,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+    } catch (error) {
+      console.error('Error saving to cache:', error);
+    }
+  };
+
   useEffect(() => {
     loadConfig();
   }, []);
 
-  // Auto-refresh data at interval
   useEffect(() => {
     if (!config) return;
 
@@ -44,7 +80,15 @@ const Index = () => {
       const response = await fetch('/config.json');
       const configData: Config = await response.json();
       setConfig(configData);
-      await loadDataFromConfig(false, configData);
+      
+      const hasCachedData = loadFromCache();
+      
+      if (hasCachedData) {
+        setLoading(false);
+        loadDataFromConfig(true, configData);
+      } else {
+        await loadDataFromConfig(false, configData);
+      }
     } catch (error) {
       console.error('Error loading config:', error);
       toast.error('Error loading configuration file. Please ensure config.json exists.');
@@ -57,7 +101,7 @@ const Index = () => {
     if (!activeConfig) return;
 
     if (!isAutoRefresh) {
-      setLoading(true);
+      setRefreshing(true);
     }
 
     try {
@@ -110,11 +154,11 @@ const Index = () => {
       setPerformances(result.performances);
       setSummary(result.summary);
       setLastRefresh(new Date());
+      
+      saveToCache(result.performances, result.summary);
 
       if (!isAutoRefresh) {
-        toast.success(`Dashboard loaded! ${result.performances.length} customers analyzed.`);
-      } else {
-        toast.success('Data refreshed automatically', { duration: 2000 });
+        toast.success(`Dashboard refreshed! ${result.performances.length} customers analyzed.`);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -123,12 +167,13 @@ const Index = () => {
       }
     } finally {
       if (!isAutoRefresh) {
-        setLoading(false);
+        setRefreshing(false);
       }
     }
   };
 
   const handleManualRefresh = () => {
+    setRefreshing(true);
     loadDataFromConfig(false);
   };
 
@@ -158,11 +203,11 @@ const Index = () => {
             <div className="flex items-center gap-4">
               <button
                 onClick={handleManualRefresh}
-                disabled={loading}
+                disabled={refreshing}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-50"
-                title="Refresh data manually"
+                title="Refresh data from server"
               >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
               <Award className="w-12 h-12 text-primary" />
