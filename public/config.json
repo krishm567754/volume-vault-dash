@@ -1,0 +1,12 @@
+{
+  "customerMasterFile": "/customer_master.csv",
+  "salesDataFolder": "/sales_data",
+  "salesFiles": [
+    "q1.xlsx",
+    "q2.xlsx",
+    "q3.xlsx",
+    "q4.xlsx",
+    "current.xlsx"
+  ],
+  "autoRefreshInterval": 30000
+}

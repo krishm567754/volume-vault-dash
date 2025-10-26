@@ -3,60 +3,99 @@ import { CustomerPerformance, DashboardSummary } from '@/types/sales';
 import { SummaryCard } from '@/components/SummaryCard';
 import { CustomerTable } from '@/components/CustomerTable';
 import { ProductDetailsModal } from '@/components/ProductDetailsModal';
-import { FileUploader } from '@/components/FileUploader';
 import { parseCSV, parseExcel, calculatePerformance } from '@/utils/dataProcessor';
-import { Target, TrendingUp, Users, Award } from 'lucide-react';
+import { Target, TrendingUp, Users, Award, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
+interface Config {
+  customerMasterFile: string;
+  salesDataFolder: string;
+  salesFiles: string[];
+  autoRefreshInterval: number;
+}
+
 const Index = () => {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [performances, setPerformances] = useState<CustomerPerformance[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerPerformance | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [hasData, setHasData] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [config, setConfig] = useState<Config | null>(null);
 
-  // Load sample data on mount
+  // Load config and initial data
   useEffect(() => {
-    loadSampleData();
+    loadConfig();
   }, []);
 
-  const loadSampleData = async () => {
-    setLoading(true);
+  // Auto-refresh data at interval
+  useEffect(() => {
+    if (!config) return;
+
+    const interval = setInterval(() => {
+      loadDataFromConfig(true);
+    }, config.autoRefreshInterval);
+
+    return () => clearInterval(interval);
+  }, [config]);
+
+  const loadConfig = async () => {
     try {
-      // Fetch sample files
-      const customerResponse = await fetch('/sample_data/customer_master.csv');
-      const customerBlob = await customerResponse.blob();
-      const customerFile = new File([customerBlob], 'customer_master.csv', { type: 'text/csv' });
-
-      const salesResponse = await fetch('/sample_data/sales_q1.xlsx');
-      const salesBlob = await salesResponse.blob();
-      const salesFile = new File([salesBlob], 'sales_q1.xlsx', { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-      });
-
-      await processFiles(customerFile, [salesFile]);
-      toast.success('Sample data loaded successfully!');
+      const response = await fetch('/config.json');
+      const configData: Config = await response.json();
+      setConfig(configData);
+      await loadDataFromConfig(false, configData);
     } catch (error) {
-      console.error('Error loading sample data:', error);
-      toast.error('Error loading sample data. Please upload your own files.');
-    } finally {
+      console.error('Error loading config:', error);
+      toast.error('Error loading configuration file. Please ensure config.json exists.');
       setLoading(false);
     }
   };
 
-  const processFiles = async (customerFile: File, salesFiles: File[]) => {
-    setLoading(true);
+  const loadDataFromConfig = async (isAutoRefresh: boolean = false, configData?: Config) => {
+    const activeConfig = configData || config;
+    if (!activeConfig) return;
+
+    if (!isAutoRefresh) {
+      setLoading(true);
+    }
+
     try {
-      // Parse customer master
-      const customers = await parseCSV(customerFile);
-      
-      if (customers.length === 0) {
-        toast.error('No valid customer data found in CSV file');
-        return;
+      // Fetch customer master
+      const customerResponse = await fetch(activeConfig.customerMasterFile);
+      if (!customerResponse.ok) {
+        throw new Error('Customer master file not found');
+      }
+      const customerBlob = await customerResponse.blob();
+      const customerFile = new File([customerBlob], 'customer_master.csv', { type: 'text/csv' });
+
+      // Fetch all sales files
+      const salesFiles: File[] = [];
+      for (const fileName of activeConfig.salesFiles) {
+        try {
+          const salesResponse = await fetch(`${activeConfig.salesDataFolder}/${fileName}`);
+          if (salesResponse.ok) {
+            const salesBlob = await salesResponse.blob();
+            const salesFile = new File([salesBlob], fileName, {
+              type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            salesFiles.push(salesFile);
+          }
+        } catch (error) {
+          console.warn(`Could not load ${fileName}, skipping...`);
+        }
       }
 
-      // Parse all sales files
+      if (salesFiles.length === 0) {
+        throw new Error('No sales files could be loaded');
+      }
+
+      // Process data
+      const customers = await parseCSV(customerFile);
+      if (customers.length === 0) {
+        throw new Error('No valid customer data found');
+      }
+
       const allSalesRecords = [];
       for (const salesFile of salesFiles) {
         const records = await parseExcel(salesFile);
@@ -64,24 +103,33 @@ const Index = () => {
       }
 
       if (allSalesRecords.length === 0) {
-        toast.error('No valid sales data found in Excel files');
-        return;
+        throw new Error('No valid sales data found');
       }
 
-      // Calculate performance
       const result = calculatePerformance(customers, allSalesRecords);
-      
       setPerformances(result.performances);
       setSummary(result.summary);
-      setHasData(true);
-      
-      toast.success(`Dashboard generated! ${result.performances.length} customers analyzed.`);
+      setLastRefresh(new Date());
+
+      if (!isAutoRefresh) {
+        toast.success(`Dashboard loaded! ${result.performances.length} customers analyzed.`);
+      } else {
+        toast.success('Data refreshed automatically', { duration: 2000 });
+      }
     } catch (error) {
-      console.error('Error processing files:', error);
-      toast.error('Error processing files. Please check file formats and try again.');
+      console.error('Error loading data:', error);
+      if (!isAutoRefresh) {
+        toast.error('Error loading data files. Please check file locations.');
+      }
     } finally {
-      setLoading(false);
+      if (!isAutoRefresh) {
+        setLoading(false);
+      }
     }
+  };
+
+  const handleManualRefresh = () => {
+    loadDataFromConfig(false);
   };
 
   const handleViewDetails = (customer: CustomerPerformance) => {
@@ -107,34 +155,40 @@ const Index = () => {
                 Track customer performance against agreement targets
               </p>
             </div>
-            <Award className="w-12 h-12 text-primary" />
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleManualRefresh}
+                disabled={loading}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-50"
+                title="Refresh data manually"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <Award className="w-12 h-12 text-primary" />
+            </div>
           </div>
+          {!loading && lastRefresh && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Last updated: {lastRefresh.toLocaleTimeString()}
+            </p>
+          )}
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-8">
-        {/* File Uploader */}
-        {!loading && (
-          <div className="max-w-2xl mx-auto">
-            <FileUploader 
-              onFilesSelected={processFiles} 
-              loading={loading}
-            />
-          </div>
-        )}
-
         {/* Loading State */}
         {loading && (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
             <p className="text-lg font-medium text-muted-foreground animate-pulse-subtle">
-              Processing your data...
+              Loading dashboard data...
             </p>
           </div>
         )}
 
         {/* Dashboard Content */}
-        {hasData && summary && !loading && (
+        {!loading && summary && (
           <>
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
