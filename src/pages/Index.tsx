@@ -3,7 +3,6 @@ import { CustomerPerformance, DashboardSummary } from '@/types/sales';
 import { SummaryCard } from '@/components/SummaryCard';
 import { CustomerTable } from '@/components/CustomerTable';
 import { ProductDetailsModal } from '@/components/ProductDetailsModal';
-import { parseCSV, parseExcel, calculatePerformance } from '@/utils/dataProcessor';
 import { Target, TrendingUp, Users, Award, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -81,70 +80,37 @@ const Index = () => {
     setRefreshing(true);
 
     try {
-      // Fetch customer master
-      const customerResponse = await fetch(config.customerMasterFile);
-      if (!customerResponse.ok) {
-        throw new Error('Customer master file not found');
-      }
-      const customerBlob = await customerResponse.blob();
-      const customerFile = new File([customerBlob], 'customer_master.csv', { type: 'text/csv' });
-
-      // Fetch all sales files
-      const salesFiles: File[] = [];
-      for (const fileName of config.salesFiles) {
-        try {
-          const salesResponse = await fetch(`${config.salesDataFolder}/${fileName}`);
-          if (salesResponse.ok) {
-            const salesBlob = await salesResponse.blob();
-            const salesFile = new File([salesBlob], fileName, {
-              type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            });
-            salesFiles.push(salesFile);
-          }
-        } catch (error) {
-          console.warn(`Could not load ${fileName}, skipping...`);
+      // Call API to update cache
+      const response = await fetch('/api/update-cache', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
         }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update cache');
       }
 
-      if (salesFiles.length === 0) {
-        throw new Error('No sales files could be loaded');
-      }
-
-      // Process data
-      const customers = await parseCSV(customerFile);
-      if (customers.length === 0) {
-        throw new Error('No valid customer data found');
-      }
-
-      const allSalesRecords = [];
-      for (const salesFile of salesFiles) {
-        const records = await parseExcel(salesFile);
-        allSalesRecords.push(...records);
-      }
-
-      if (allSalesRecords.length === 0) {
-        throw new Error('No valid sales data found');
-      }
-
-      const result = calculatePerformance(customers, allSalesRecords);
-      const timestamp = new Date();
+      const result = await response.json();
       
-      setPerformances(result.performances);
-      setSummary(result.summary);
-      setLastRefresh(timestamp);
+      if (result.success && result.data) {
+        const { performances, summary, timestamp } = result.data;
+        
+        setPerformances(performances);
+        setSummary(summary);
+        setLastRefresh(new Date(timestamp));
 
-      // Cache in localStorage
-      const cacheData = {
-        performances: result.performances,
-        summary: result.summary,
-        timestamp: timestamp.toISOString()
-      };
-      localStorage.setItem('dashboard_cache', JSON.stringify(cacheData));
+        // Cache in localStorage
+        localStorage.setItem('dashboard_cache', JSON.stringify(result.data));
 
-      toast.success(`Dashboard refreshed! ${result.performances.length} customers analyzed.`);
+        toast.success(result.message || `Dashboard refreshed! ${performances.length} customers analyzed.`);
+      } else {
+        throw new Error(result.error || 'Unknown error');
+      }
     } catch (error) {
       console.error('Error loading data:', error);
-      toast.error('Error loading data files. Please check file locations.');
+      toast.error('Error refreshing data: ' + error.message);
     } finally {
       setRefreshing(false);
     }
