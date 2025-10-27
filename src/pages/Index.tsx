@@ -16,53 +16,73 @@ interface Config {
 
 const Index = () => {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [performances, setPerformances] = useState<CustomerPerformance[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerPerformance | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
 
-  // Load config and initial data
+  // Load cached data instantly on mount
   useEffect(() => {
-    loadConfig();
+    loadCachedData();
   }, []);
 
-  // Auto-refresh data at interval
-  useEffect(() => {
-    if (!config) return;
+  const loadCachedData = async () => {
+    try {
+      // Try localStorage first (fastest)
+      const cached = localStorage.getItem('dashboard_cache');
+      if (cached) {
+        const data = JSON.parse(cached);
+        setPerformances(data.performances);
+        setSummary(data.summary);
+        setLastRefresh(new Date(data.timestamp));
+        setLoading(false);
+        return;
+      }
 
-    const interval = setInterval(() => {
-      loadDataFromConfig(true);
-    }, config.autoRefreshInterval);
-
-    return () => clearInterval(interval);
-  }, [config]);
+      // Fall back to cache.json file
+      const response = await fetch('/cache.json');
+      if (response.ok) {
+        const data = await response.json();
+        setPerformances(data.performances);
+        setSummary(data.summary);
+        setLastRefresh(new Date(data.timestamp));
+        toast.success('Dashboard loaded from cache');
+      }
+    } catch (error) {
+      console.error('No cache found, need manual refresh:', error);
+      toast.info('Click Refresh to load latest data');
+    } finally {
+      setLoading(false);
+      // Load config for refresh functionality
+      loadConfig();
+    }
+  };
 
   const loadConfig = async () => {
     try {
       const response = await fetch('/config.json');
       const configData: Config = await response.json();
       setConfig(configData);
-      await loadDataFromConfig(false, configData);
     } catch (error) {
       console.error('Error loading config:', error);
-      toast.error('Error loading configuration file. Please ensure config.json exists.');
-      setLoading(false);
+      toast.error('Error loading configuration file.');
     }
   };
 
-  const loadDataFromConfig = async (isAutoRefresh: boolean = false, configData?: Config) => {
-    const activeConfig = configData || config;
-    if (!activeConfig) return;
-
-    if (!isAutoRefresh) {
-      setLoading(true);
+  const loadDataFromConfig = async () => {
+    if (!config) {
+      toast.error('Configuration not loaded');
+      return;
     }
+
+    setRefreshing(true);
 
     try {
       // Fetch customer master
-      const customerResponse = await fetch(activeConfig.customerMasterFile);
+      const customerResponse = await fetch(config.customerMasterFile);
       if (!customerResponse.ok) {
         throw new Error('Customer master file not found');
       }
@@ -71,9 +91,9 @@ const Index = () => {
 
       // Fetch all sales files
       const salesFiles: File[] = [];
-      for (const fileName of activeConfig.salesFiles) {
+      for (const fileName of config.salesFiles) {
         try {
-          const salesResponse = await fetch(`${activeConfig.salesDataFolder}/${fileName}`);
+          const salesResponse = await fetch(`${config.salesDataFolder}/${fileName}`);
           if (salesResponse.ok) {
             const salesBlob = await salesResponse.blob();
             const salesFile = new File([salesBlob], fileName, {
@@ -107,29 +127,31 @@ const Index = () => {
       }
 
       const result = calculatePerformance(customers, allSalesRecords);
+      const timestamp = new Date();
+      
       setPerformances(result.performances);
       setSummary(result.summary);
-      setLastRefresh(new Date());
+      setLastRefresh(timestamp);
 
-      if (!isAutoRefresh) {
-        toast.success(`Dashboard loaded! ${result.performances.length} customers analyzed.`);
-      } else {
-        toast.success('Data refreshed automatically', { duration: 2000 });
-      }
+      // Cache in localStorage
+      const cacheData = {
+        performances: result.performances,
+        summary: result.summary,
+        timestamp: timestamp.toISOString()
+      };
+      localStorage.setItem('dashboard_cache', JSON.stringify(cacheData));
+
+      toast.success(`Dashboard refreshed! ${result.performances.length} customers analyzed.`);
     } catch (error) {
       console.error('Error loading data:', error);
-      if (!isAutoRefresh) {
-        toast.error('Error loading data files. Please check file locations.');
-      }
+      toast.error('Error loading data files. Please check file locations.');
     } finally {
-      if (!isAutoRefresh) {
-        setLoading(false);
-      }
+      setRefreshing(false);
     }
   };
 
   const handleManualRefresh = () => {
-    loadDataFromConfig(false);
+    loadDataFromConfig();
   };
 
   const handleViewDetails = (customer: CustomerPerformance) => {
@@ -158,12 +180,12 @@ const Index = () => {
             <div className="flex items-center gap-4">
               <button
                 onClick={handleManualRefresh}
-                disabled={loading}
+                disabled={refreshing}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-50"
                 title="Refresh data manually"
               >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh'}
               </button>
               <Award className="w-12 h-12 text-primary" />
             </div>

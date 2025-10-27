@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generate Cache File</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        button { background: #4CAF50; color: white; padding: 15px 30px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #45a049; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #output { margin-top: 20px; padding: 20px; background: #f5f5f5; border-radius: 5px; white-space: pre-wrap; word-break: break-all; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Generate Cache File</h1>
+    <p>Click the button below to generate cache.json from your current data files:</p>
+    <button id="generateBtn" onclick="generateCache()">Generate cache.json</button>
+    <div id="output"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <script>
+        async function generateCache() {
+            const output = document.getElementById('output');
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            output.innerHTML = 'Processing...';
+
+            try {
+                // Load config
+                const configRes = await fetch('/config.json');
+                const config = await configRes.json();
+
+                // Parse CSV
+                const parseCSV = (file) => {
+                    return new Promise((resolve, reject) => {
+                        Papa.parse(file, {
+                            header: true,
+                            complete: (results) => {
+                                const customers = results.data
+                                    .filter(row => row['Customer Code'] && row['Customer Name'])
+                                    .map(row => ({
+                                        customerCode: row['Customer Code'].trim(),
+                                        customerName: row['Customer Name'].trim(),
+                                        agreementStartDate: row['Agreement Start Date']?.trim() || '',
+                                        agreementEndDate: row['Agreement End Date']?.trim() || '',
+                                        agreementTargetVolume: parseFloat(row['Agreement Target Volume']) || 0
+                                    }));
+                                resolve(customers);
+                            },
+                            error: reject
+                        });
+                    });
+                };
+
+                // Parse Excel
+                const parseExcel = async (file) => {
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                    
+                    return jsonData
+                        .filter(row => row['Customer Code'] && row['Product Name'])
+                        .map(row => ({
+                            customerCode: String(row['Customer Code']).trim(),
+                            productName: String(row['Product Name']).trim(),
+                            productVolume: parseFloat(row['Product Volume']) || 0
+                        }));
+                };
+
+                // Calculate performance
+                const calculatePerformance = (customers, salesRecords) => {
+                    const performances = customers.map(customer => {
+                        const customerSales = salesRecords.filter(
+                            record => record.customerCode === customer.customerCode
+                        );
+
+                        const productMap = new Map();
+                        customerSales.forEach(sale => {
+                            const current = productMap.get(sale.productName) || 0;
+                            productMap.set(sale.productName, current + sale.productVolume);
+                        });
+
+                        const products = Array.from(productMap.entries()).map(([name, volume]) => ({
+                            productName: name,
+                            totalVolume: volume
+                        }));
+
+                        const achievedVolume = products.reduce((sum, p) => sum + p.totalVolume, 0);
+                        const progressPercentage = customer.agreementTargetVolume > 0
+                            ? (achievedVolume / customer.agreementTargetVolume) * 100
+                            : 0;
+
+                        return {
+                            ...customer,
+                            achievedVolume,
+                            progressPercentage,
+                            products
+                        };
+                    });
+
+                    const summary = {
+                        totalTarget: customers.reduce((sum, c) => sum + c.agreementTargetVolume, 0),
+                        totalAchieved: performances.reduce((sum, p) => sum + p.achievedVolume, 0),
+                        overallProgress: 0,
+                        totalCustomers: customers.length
+                    };
+
+                    summary.overallProgress = summary.totalTarget > 0
+                        ? (summary.totalAchieved / summary.totalTarget) * 100
+                        : 0;
+
+                    return { performances, summary };
+                };
+
+                // Fetch customer master
+                const customerRes = await fetch(config.customerMasterFile);
+                const customerBlob = await customerRes.blob();
+                const customerFile = new File([customerBlob], 'customer_master.csv', { type: 'text/csv' });
+                const customers = await parseCSV(customerFile);
+
+                // Fetch all sales files
+                const allSalesRecords = [];
+                for (const fileName of config.salesFiles) {
+                    try {
+                        const salesRes = await fetch(`${config.salesDataFolder}/${fileName}`);
+                        if (salesRes.ok) {
+                            const salesBlob = await salesRes.blob();
+                            const salesFile = new File([salesBlob], fileName, {
+                                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                            });
+                            const records = await parseExcel(salesFile);
+                            allSalesRecords.push(...records);
+                        }
+                    } catch (error) {
+                        console.warn(`Could not load ${fileName}`);
+                    }
+                }
+
+                // Calculate and generate cache
+                const result = calculatePerformance(customers, allSalesRecords);
+                const cacheData = {
+                    performances: result.performances,
+                    summary: result.summary,
+                    timestamp: new Date().toISOString()
+                };
+
+                // Display result
+                output.innerHTML = '<span class="success">✓ Cache generated successfully!</span>\n\n';
+                output.innerHTML += '<strong>Copy this JSON and save it as cache.json in your htdocs folder:</strong>\n\n';
+                output.innerHTML += JSON.stringify(cacheData, null, 2);
+
+            } catch (error) {
+                output.innerHTML = '<span class="error">✗ Error: ' + error.message + '</span>';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
