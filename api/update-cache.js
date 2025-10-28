@@ -1,8 +1,6 @@
 import fetch from 'node-fetch';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import fs from 'fs';
-import path from 'path';
 
 export default async function handler(req, res) {
   // Enable CORS
@@ -136,15 +134,15 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString()
     };
 
-    // Write to cache.json in public folder
-    const publicPath = path.join(process.cwd(), 'public', 'cache.json');
-    fs.writeFileSync(publicPath, JSON.stringify(cacheData, null, 2));
+    // Note: Vercel serverless functions have read-only filesystem
+    // So we just return the data instead of writing to file
+    // The frontend will cache it in localStorage for fast subsequent loads
 
     // Return the cached data
     res.status(200).json({
       success: true,
       data: cacheData,
-      message: `Updated cache with ${result.performances.length} customers`
+      message: `Cache updated with ${result.performances.length} customers`
     });
 
   } catch (error) {
