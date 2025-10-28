@@ -2,7 +2,28 @@
 
 ## Quick Start
 
-This project uses **browser-based caching** via serverless API. Each user's browser caches data locally for instant loading, and the "Refresh" button fetches the latest data from your files.
+This project uses **Lovable Cloud** for shared database caching. When anyone clicks "Refresh", the cache updates for ALL users - everyone sees the same data automatically!
+
+---
+
+## How It Works
+
+### First Visit (Any User):
+- Dashboard loads cached data from database instantly
+- Shows last refresh time
+- If no cache exists, shows "Click Refresh to load latest data"
+
+### When Anyone Clicks "Refresh":
+1. API processes all CSV/Excel files
+2. Updates the **shared database cache**
+3. ALL users see the updated data on their next page load
+4. Also cached in browser localStorage for instant subsequent visits
+
+### Magic: Shared Cache
+- One database cache shared by everyone
+- When User A refreshes → All users (B, C, D...) see new data
+- No need for each user to click refresh separately
+- Perfect for team dashboards
 
 ---
 
@@ -59,38 +80,32 @@ git push
 7. Click **"Deploy"**
 8. Wait 1-2 minutes for deployment to complete
 
-### 4. First Load
+### 4. First Load & Setup
 
 1. Visit your deployed site: `https://your-project.vercel.app`
-2. You'll see "Click Refresh to load latest data"
+2. If no data is cached yet, you'll see "Click Refresh to load latest data"
 3. Click the **"Refresh"** button
-4. API will process all data and cache in your browser
-5. Done! 🎉 Data loads instantly on next visit
+4. API processes all data and saves to shared database
+5. Done! 🎉 All users now see this data automatically
+
+**Note:** After deployment, the database cache is automatically configured via Lovable Cloud. No additional setup needed!
 
 ---
 
 ## How It Works
 
-### First Visit (New User):
-- Shows "Click Refresh to load latest data" message
-- User clicks "Refresh"
-- API processes all files and returns calculated data
-- Browser saves data to localStorage for instant future loads
+### Shared Database Cache System:
+- All users share ONE cache stored in Lovable Cloud database
+- When anyone clicks "Refresh", the shared cache updates
+- All users automatically see the latest data
+- Also cached locally in browser for instant subsequent loads
 
-### Return Visits:
-- Data loads instantly from browser localStorage (< 1 second)
-- No API calls needed
-- Shows last refresh timestamp
+### Data Flow:
+1. **Initial Load**: Fetches from shared database → Falls back to `cache.json` if empty
+2. **Refresh Click**: Processes files → Updates database → All users see new data
+3. **Background Sync**: Browser checks database for updates in background
 
-### Clicking "Refresh":
-1. Frontend calls `/api/update-cache` serverless function
-2. API reads all files from `public/` folder (CSV + Excel files)
-3. Processes customer master + all sales files
-4. Calculates performance metrics
-5. Returns fresh data to user
-6. Browser saves to localStorage for next time
-
-**Note:** Each user's browser has its own cache. This is perfect for personal dashboards or team dashboards where users refresh periodically to see latest data.
+**Result:** One person refreshes, everyone benefits!
 
 ---
 
@@ -199,40 +214,49 @@ your-project/
 - Verify `config.json` has correct file paths
 
 ### Data Not Updating
-- Each user must click "Refresh" to update their browser cache
+- Data updates in shared database when anyone clicks "Refresh"
+- All users will see updates on their next page load/visit
 - Check browser console (F12) for errors
 - Verify files were uploaded to GitHub
 - Wait for Vercel auto-deployment to complete (~1-2 min)
-- Try clearing browser cache (localStorage) if needed
 
 ### Vercel Build Failed
-- Check you have `node-fetch@2`, `papaparse`, and `xlsx` in dependencies
+- Check you have `@supabase/supabase-js`, `node-fetch@2`, `papaparse`, and `xlsx` in dependencies
 - Lovable automatically manages dependencies
 - If issues persist, try redeploying from Vercel dashboard
+
+### Environment Variables on Vercel
+- Lovable Cloud automatically provides `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`
+- These are configured automatically when you enable Lovable Cloud
+- No manual setup needed
 
 ---
 
 ## Performance
 
-- **Initial Load (returning user)**: < 1 second (from browser cache)
-- **First Load (new user)**: Click "Refresh" button
+- **Initial Load**: < 1 second (from database or browser cache)
+- **First Load (cold start)**: Click "Refresh" button
 - **Refresh Time**: 5-15 seconds (depends on file sizes)
+- **Shared Cache**: Everyone sees same data automatically
 - **Vercel Free Tier**: 
   - 100 GB bandwidth/month
   - 100 hours serverless execution/month
   - More than enough for this dashboard
+- **Lovable Cloud**: Free tier includes database storage and API calls
 
 ---
 
 ## Benefits
 
-✅ **Fast Loading** - Browser localStorage caching  
+✅ **Shared Cache** - One person refreshes, everyone sees updates  
+✅ **Fast Loading** - Database + browser caching  
 ✅ **Instant Returns** - Data loads instantly on return visits  
+✅ **Team Friendly** - Perfect for teams using same dashboard  
 ✅ **Low Bandwidth** - Only refresh button processes files  
 ✅ **Serverless** - No server management  
-✅ **Free Hosting** - GitHub + Vercel free tier  
+✅ **Free Hosting** - GitHub + Vercel + Lovable Cloud free tiers  
 ✅ **Auto Deploy** - Push to GitHub → Auto deployed  
-✅ **Real-time Updates** - Refresh button always fetches latest data
+✅ **Real-time Updates** - Shared database keeps everyone in sync
 
 ---
 

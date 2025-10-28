@@ -39,25 +39,66 @@ const Index = () => {
         setSummary(data.summary);
         setLastRefresh(new Date(data.timestamp));
         setLoading(false);
+        
+        // Load from database in background to get latest shared cache
+        loadFromDatabase();
         return;
       }
 
-      // Fall back to cache.json file
-      const response = await fetch('/cache.json');
-      if (response.ok) {
-        const data = await response.json();
-        setPerformances(data.performances);
-        setSummary(data.summary);
-        setLastRefresh(new Date(data.timestamp));
-        toast.success('Dashboard loaded from cache');
-      }
+      // Load from database (shared cache)
+      await loadFromDatabase();
     } catch (error) {
-      console.error('No cache found, need manual refresh:', error);
+      console.error('Error loading cache:', error);
       toast.info('Click Refresh to load latest data');
     } finally {
       setLoading(false);
       // Load config for refresh functionality
       loadConfig();
+    }
+  };
+
+  const loadFromDatabase = async () => {
+    try {
+      const { supabase } = await import('@/integrations/supabase/client');
+      const { data, error } = await supabase
+        .from('dashboard_cache')
+        .select('*')
+        .eq('id', 1)
+        .single();
+
+      if (!error && data) {
+        const performances = data.performances as unknown as CustomerPerformance[];
+        const summary = data.summary as unknown as DashboardSummary;
+        
+        if (performances && performances.length > 0) {
+          const cacheData = {
+            performances,
+            summary,
+            timestamp: data.updated_at
+          };
+          
+          setPerformances(performances);
+          setSummary(summary);
+          setLastRefresh(new Date(data.updated_at));
+          
+          // Update localStorage
+          localStorage.setItem('dashboard_cache', JSON.stringify(cacheData));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading from database:', error);
+      // Fall back to cache.json file
+      try {
+        const response = await fetch('/cache.json');
+        if (response.ok) {
+          const data = await response.json();
+          setPerformances(data.performances);
+          setSummary(data.summary);
+          setLastRefresh(new Date(data.timestamp));
+        }
+      } catch (fallbackError) {
+        console.error('Error loading fallback cache:', fallbackError);
+      }
     }
   };
 

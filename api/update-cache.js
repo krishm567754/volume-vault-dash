@@ -1,8 +1,9 @@
-import fetch from 'node-fetch';
-import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
+const fetch = require('node-fetch');
+const Papa = require('papaparse');
+const XLSX = require('xlsx');
+const { createClient } = require('@supabase/supabase-js');
 
-export default async function handler(req, res) {
+const handler = async (req, res) => {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -128,21 +129,47 @@ export default async function handler(req, res) {
 
     // Calculate and generate cache
     const result = calculatePerformance(customers, allSalesRecords);
+    const { performances, summary } = result;
+    
     const cacheData = {
-      performances: result.performances,
-      summary: result.summary,
+      performances,
+      summary,
       timestamp: new Date().toISOString()
     };
 
-    // Note: Vercel serverless functions have read-only filesystem
-    // So we just return the data instead of writing to file
-    // The frontend will cache it in localStorage for fast subsequent loads
+    // Save to Supabase database for shared cache
+    try {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL;
+      const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      
+      if (supabaseUrl && supabaseKey) {
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        
+        const { error: dbError } = await supabase
+          .from('dashboard_cache')
+          .update({
+            performances,
+            summary,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', 1);
+
+        if (dbError) {
+          console.error('Error updating database cache:', dbError);
+        } else {
+          console.log('Successfully updated shared cache in database');
+        }
+      }
+    } catch (dbError) {
+      console.error('Error saving to database:', dbError);
+      // Continue even if DB save fails
+    }
 
     // Return the cached data
     res.status(200).json({
       success: true,
       data: cacheData,
-      message: `Cache updated with ${result.performances.length} customers`
+      message: `Cache updated with ${performances.length} customers`
     });
 
   } catch (error) {
@@ -152,4 +179,6 @@ export default async function handler(req, res) {
       error: error.message
     });
   }
-}
+};
+
+module.exports = handler;
