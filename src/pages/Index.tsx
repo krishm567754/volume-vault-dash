@@ -5,6 +5,7 @@ import { CustomerTable } from '@/components/CustomerTable';
 import { ProductDetailsModal } from '@/components/ProductDetailsModal';
 import { Target, TrendingUp, Users, Award, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { parseCSVFromURL, parseExcelFromURL, calculatePerformance } from '@/utils/dataProcessor';
 
 interface Config {
   customerMasterFile: string;
@@ -80,7 +81,7 @@ const Index = () => {
     setRefreshing(true);
 
     try {
-      // Call API to update cache
+      // Try API first (for Vercel production)
       const response = await fetch('/api/update-cache', {
         method: 'POST',
         headers: {
@@ -88,26 +89,61 @@ const Index = () => {
         }
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to update cache');
-      }
-
-      const result = await response.json();
-      
-      if (result.success && result.data) {
-        const { performances, summary, timestamp } = result.data;
+      if (response.ok) {
+        // API endpoint exists (Vercel)
+        const result = await response.json();
         
-        setPerformances(performances);
-        setSummary(summary);
-        setLastRefresh(new Date(timestamp));
+        if (result.success && result.data) {
+          const { performances, summary, timestamp } = result.data;
+          
+          setPerformances(performances);
+          setSummary(summary);
+          setLastRefresh(new Date(timestamp));
 
-        // Cache in localStorage
-        localStorage.setItem('dashboard_cache', JSON.stringify(result.data));
+          // Cache in localStorage
+          localStorage.setItem('dashboard_cache', JSON.stringify(result.data));
 
-        toast.success(result.message || `Dashboard refreshed! ${performances.length} customers analyzed.`);
-      } else {
-        throw new Error(result.error || 'Unknown error');
+          toast.success(result.message || `Dashboard refreshed! ${performances.length} customers analyzed.`);
+          setRefreshing(false);
+          return;
+        }
       }
+
+      // Fallback to frontend processing (for Lovable preview)
+      console.log('API not available, processing data on frontend...');
+      
+      // Load customer master
+      const customers = await parseCSVFromURL(config.customerMasterFile);
+      
+      // Load all sales files
+      const allSalesRecords = [];
+      for (const fileName of config.salesFiles) {
+        try {
+          const records = await parseExcelFromURL(`${config.salesDataFolder}/${fileName}`);
+          allSalesRecords.push(...records);
+        } catch (error) {
+          console.warn(`Could not load ${fileName}:`, error);
+        }
+      }
+
+      // Calculate performance
+      const result = calculatePerformance(customers, allSalesRecords);
+      
+      const cacheData = {
+        performances: result.performances,
+        summary: result.summary,
+        timestamp: new Date().toISOString()
+      };
+
+      setPerformances(result.performances);
+      setSummary(result.summary);
+      setLastRefresh(new Date());
+
+      // Cache in localStorage
+      localStorage.setItem('dashboard_cache', JSON.stringify(cacheData));
+
+      toast.success(`Dashboard refreshed! ${result.performances.length} customers analyzed.`);
+
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Error refreshing data: ' + error.message);
