@@ -43,20 +43,22 @@ const Index = () => {
         }
       }
 
+      // Load config first
+      await loadConfig();
+
       // Always load from database to get the latest shared data
       const hasData = await loadFromDatabase();
       
       if (!hasData && (!cached || !JSON.parse(cached).performances?.length)) {
-        // No cached data available anywhere
-        toast.info('Click Refresh to load data');
+        // No cached data available anywhere - auto-refresh
+        console.log('No data found, auto-refreshing...');
+        await loadDataFromConfig();
       }
     } catch (error) {
       console.error('Error loading cache:', error);
-      toast.info('Click Refresh to load latest data');
+      toast.error('Error loading data');
     } finally {
       setLoading(false);
-      // Load config for refresh functionality
-      loadConfig();
     }
   };
 
@@ -97,6 +99,7 @@ const Index = () => {
   };
 
   const loadConfig = async () => {
+    if (config) return; // Already loaded
     try {
       const response = await fetch('/config.json');
       const configData: Config = await response.json();
