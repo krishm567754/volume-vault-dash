@@ -31,7 +31,7 @@ const Index = () => {
 
   const loadCachedData = async () => {
     try {
-      // Try localStorage first (fastest)
+      // Show localStorage data immediately for fast initial load
       const cached = localStorage.getItem('dashboard_cache');
       if (cached) {
         const data = JSON.parse(cached);
@@ -40,18 +40,14 @@ const Index = () => {
           setSummary(data.summary);
           setLastRefresh(new Date(data.timestamp));
           setLoading(false);
-          
-          // Load from database in background to get latest shared cache
-          loadFromDatabase();
-          return;
         }
       }
 
-      // Load from database (shared cache)
+      // Always load from database to get the latest shared data
       const hasData = await loadFromDatabase();
       
-      if (!hasData) {
-        // No cached data available
+      if (!hasData && (!cached || !JSON.parse(cached).performances?.length)) {
+        // No cached data available anywhere
         toast.info('Click Refresh to load data');
       }
     } catch (error) {
