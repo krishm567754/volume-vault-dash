@@ -128,7 +128,7 @@ const Index = () => {
       });
 
       if (response.ok) {
-        // API endpoint exists (Vercel)
+        // API endpoint exists (Vercel) - data is already saved to database by the API
         const result = await response.json();
         
         if (result.success && result.data) {
@@ -172,6 +172,27 @@ const Index = () => {
         summary: result.summary,
         timestamp: new Date().toISOString()
       };
+
+      // Save to database so all users can see it
+      try {
+        const { supabase } = await import('@/integrations/supabase/client');
+        const { error: dbError } = await supabase
+          .from('dashboard_cache')
+          .update({
+            performances: result.performances as any,
+            summary: result.summary as any,
+            updated_at: cacheData.timestamp
+          })
+          .eq('id', 1);
+        
+        if (dbError) {
+          console.error('Error saving to database:', dbError);
+        } else {
+          console.log('Successfully saved to shared database cache');
+        }
+      } catch (dbError) {
+        console.error('Error saving to database:', dbError);
+      }
 
       setPerformances(result.performances);
       setSummary(result.summary);
