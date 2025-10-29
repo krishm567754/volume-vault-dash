@@ -147,12 +147,14 @@ const handler = async (req, res) => {
         
         const { error: dbError } = await supabase
           .from('dashboard_cache')
-          .update({
+          .upsert({
+            id: 1,
             performances,
             summary,
             updated_at: new Date().toISOString()
-          })
-          .eq('id', 1);
+          }, {
+            onConflict: 'id'
+          });
 
         if (dbError) {
           console.error('Error updating database cache:', dbError);
