@@ -35,18 +35,25 @@ const Index = () => {
       const cached = localStorage.getItem('dashboard_cache');
       if (cached) {
         const data = JSON.parse(cached);
-        setPerformances(data.performances);
-        setSummary(data.summary);
-        setLastRefresh(new Date(data.timestamp));
-        setLoading(false);
-        
-        // Load from database in background to get latest shared cache
-        loadFromDatabase();
-        return;
+        if (data.performances && data.performances.length > 0) {
+          setPerformances(data.performances);
+          setSummary(data.summary);
+          setLastRefresh(new Date(data.timestamp));
+          setLoading(false);
+          
+          // Load from database in background to get latest shared cache
+          loadFromDatabase();
+          return;
+        }
       }
 
       // Load from database (shared cache)
-      await loadFromDatabase();
+      const hasData = await loadFromDatabase();
+      
+      if (!hasData) {
+        // No cached data available
+        toast.info('Click Refresh to load data');
+      }
     } catch (error) {
       console.error('Error loading cache:', error);
       toast.info('Click Refresh to load latest data');
@@ -83,22 +90,13 @@ const Index = () => {
           
           // Update localStorage
           localStorage.setItem('dashboard_cache', JSON.stringify(cacheData));
+          return true;
         }
       }
+      return false;
     } catch (error) {
       console.error('Error loading from database:', error);
-      // Fall back to cache.json file
-      try {
-        const response = await fetch('/cache.json');
-        if (response.ok) {
-          const data = await response.json();
-          setPerformances(data.performances);
-          setSummary(data.summary);
-          setLastRefresh(new Date(data.timestamp));
-        }
-      } catch (fallbackError) {
-        console.error('Error loading fallback cache:', fallbackError);
-      }
+      return false;
     }
   };
 
@@ -252,8 +250,18 @@ const Index = () => {
           </div>
         )}
 
+        {/* No Data State */}
+        {!loading && (!summary || performances.length === 0) && (
+          <div className="flex flex-col items-center justify-center py-20 space-y-4">
+            <div className="text-center space-y-2">
+              <h3 className="text-xl font-semibold">No Data Available</h3>
+              <p className="text-muted-foreground">Click the Refresh button to load the latest data</p>
+            </div>
+          </div>
+        )}
+
         {/* Dashboard Content */}
-        {!loading && summary && (
+        {!loading && summary && performances.length > 0 && (
           <>
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
